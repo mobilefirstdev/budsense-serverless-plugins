@@ -16,7 +16,8 @@ After CloudFormation has deployed the stack, the plugin runs these steps in orde
 1. **Lambda aliases.** Publishes a new version of each function that changed and points the stage alias at it.
 2. **Async invoke settings.** Mirrors `maximumRetryAttempts` and `maximumEventAge` onto the alias, since Serverless only sets them on `$LATEST`.
 3. **Provisioned concurrency.** Keeps the configured number of warm instances on the alias for the functions listed under it, and removes them when they are unlisted.
-4. **API Gateway routing.** Rewrites each REST and WebSocket integration to invoke `function:${stageVariables.alias}`, grants the invoke permissions, and deploys the stage. A non-default alias (`--param alias=rc`) gets its own stage on the same API.
+4. **Cognito trigger permissions.** Lets a user pool invoke the alias of the trigger functions listed for it, so triggers can run on the stage alias instead of `$LATEST`.
+5. **API Gateway routing.** Rewrites each REST and WebSocket integration to invoke `function:${stageVariables.alias}`, grants the invoke permissions, and deploys the stage. A non-default alias (`--param alias=rc`) gets its own stage on the same API.
 
 Every step reads its configuration from `custom.alias` in `serverless.yml`. The alias and API Gateway steps live in `src/index.js`; each later step is its own file under `src/` and only hooks into the deploy flow there.
 
@@ -77,6 +78,10 @@ custom:
       prod:
         sign-in: 1
     skipProvisionedConcurrency: false # Skip the provisioned concurrency step (default: false)
+    cognitoTriggers:                # Let a Cognito user pool invoke these functions' alias (see below)
+      userPool: CognitoUserPool
+      functions:
+        - define-auth-challenge
     verbose: true                   # Enable detailed logging (default: false)
 ```
 
@@ -333,6 +338,37 @@ Validation runs before any AWS call: each alias key must be a valid alias name, 
 The deploying credentials need `lambda:GetProvisionedConcurrencyConfig`, `lambda:PutProvisionedConcurrencyConfig` and `lambda:DeleteProvisionedConcurrencyConfig`.
 
 To skip the step for one deploy, pass `--skip-provisioned-concurrency`, or set `skipProvisionedConcurrency: true` under `custom.alias`.
+
+## Cognito trigger permissions on the alias
+
+A Cognito user pool's `LambdaConfig` can name a qualified function ARN (`...:function:<name>:<alias>`), so its triggers run the alias's version rather than `$LATEST`. With `$LATEST`, any deploy of the stack changes the code the pool runs at once, an `rc` deploy of the prod stack included; on the stage alias the pool stays on the version that stage was deployed with, and the trigger can be kept warm like any other aliased function.
+
+Lambda grants invoke permissions per qualifier, so a permission on the bare function does not cover the alias, and an `AWS::Lambda::Permission` resource cannot reference the alias before this plugin has created it on a stage's first deploy. This step grants the permission after the alias step, on every deploy:
+
+```yaml
+custom:
+  alias:
+    cognitoTriggers:
+      userPool: CognitoUserPool      # logical id of the AWS::Cognito::UserPool in this stack
+      functions:
+        - define-auth-challenge
+        - create-auth-challenge
+        - verify-auth-challenge
+```
+
+Point the pool at the alias with a plain ARN string (Cognito does not check that the alias exists yet) and remove the `AWS::Lambda::Permission` resources for those triggers. Use the stage name as the alias, not the deploying alias, so an `rc` deploy leaves the pool on `prod`:
+
+```yaml
+resources:
+  Resources:
+    CognitoUserPool:
+      Type: AWS::Cognito::UserPool
+      Properties:
+        LambdaConfig:
+          DefineAuthChallenge: arn:aws:lambda:${aws:region}:${aws:accountId}:function:${self:service}-${sls:stage}-define-auth-challenge:${sls:stage}
+```
+
+For a pool in another stack, give `userPoolArn` instead of `userPool`. One statement per alias and pool is removed and re-added each deploy, so a changed pool never leaves a stale grant behind. The deploying credentials need `cloudformation:DescribeStackResource` (to resolve `userPool`) and `lambda:AddPermission` / `lambda:RemovePermission` on the alias, which the API Gateway step already needs.
 
 ## Plugin Compatibility and Limitations
 
