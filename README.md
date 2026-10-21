@@ -15,7 +15,8 @@ After CloudFormation has deployed the stack, the plugin runs these steps in orde
 
 1. **Lambda aliases.** Publishes a new version of each function that changed and points the stage alias at it.
 2. **Async invoke settings.** Mirrors `maximumRetryAttempts` and `maximumEventAge` onto the alias, since Serverless only sets them on `$LATEST`.
-3. **API Gateway routing.** Rewrites each REST and WebSocket integration to invoke `function:${stageVariables.alias}`, grants the invoke permissions, and deploys the stage. A non-default alias (`--param alias=rc`) gets its own stage on the same API.
+3. **Provisioned concurrency.** Keeps the configured number of warm instances on the alias for the functions listed under it, and removes them when they are unlisted.
+4. **API Gateway routing.** Rewrites each REST and WebSocket integration to invoke `function:${stageVariables.alias}`, grants the invoke permissions, and deploys the stage. A non-default alias (`--param alias=rc`) gets its own stage on the same API.
 
 Every step reads its configuration from `custom.alias` in `serverless.yml`. The alias and API Gateway steps live in `src/index.js`; each later step is its own file under `src/` and only hooks into the deploy flow there.
 
@@ -71,6 +72,11 @@ custom:
       - some-other-function
     skipApiGateway: false           # Skip HTTP API Gateway deployment (default: false)
     skipWebSocketGateway: false     # Skip WebSocket API Gateway deployment (default: false)
+    skipEventInvokeConfig: false    # Skip mirroring async invoke settings onto the alias (default: false)
+    provisionedConcurrency:         # Warm instances per alias, per function (see below)
+      prod:
+        sign-in: 1
+    skipProvisionedConcurrency: false # Skip the provisioned concurrency step (default: false)
     verbose: true                   # Enable detailed logging (default: false)
 ```
 
@@ -292,6 +298,42 @@ custom:
 
 or pass `--skip-event-invoke-config` on the command line.
 
+## Keeping functions warm (provisioned concurrency)
+
+Provisioned concurrency keeps a set number of initialized instances of a function version ready, so requests to it skip the cold start. A provisioned instance only serves the exact alias it is attached to, and API Gateway invokes the stage alias this plugin manages, so the plugin sets provisioned concurrency on that alias. Serverless's own `provisionedConcurrency` property cannot be used alongside this plugin: it creates a separate CloudFormation-managed alias that nothing routes to.
+
+The map is keyed by alias name and then by function, so a `--param alias=rc` deploy of the prod stack never inherits prod's warm instances:
+
+```yaml
+custom:
+  alias:
+    name: ${param:alias, self:provider.stage}
+    provisionedConcurrency:
+      prod:
+        sign-in: 1
+        pin-sign-in: 1
+```
+
+Once the key is present, the plugin owns provisioned concurrency on the deploying alias for every aliased function. After the alias step on each deploy it reads each function's current config on the alias and:
+
+| Wanted | Current         | Action                                                                                  |
+| ------ | --------------- | --------------------------------------------------------------------------------------- |
+| > 0    | none            | `PutProvisionedConcurrencyConfig`                                                       |
+| > 0    | different count | `PutProvisionedConcurrencyConfig`                                                       |
+| > 0    | same count      | nothing to send; the alias may have moved to a new version, so the wait below still runs |
+| 0      | exists          | `DeleteProvisionedConcurrencyConfig`                                                    |
+| 0      | none            | nothing                                                                                 |
+
+A function that is missing from the alias's map counts as 0, so removing an entry (or an alias block) deletes its config on the next deploy. When the `provisionedConcurrency` key is absent altogether the plugin makes no provisioned concurrency calls at all.
+
+The plugin then waits, polling every 5 seconds for up to 5 minutes, until every requested alias reports `READY`. A `FAILED` status fails the deploy with AWS's reason, as does a failed put or delete. Past the timeout the deploy continues with a warning: the config is in place and AWS keeps allocating.
+
+Validation runs before any AWS call: each alias key must be a valid alias name, each function must exist in `serverless.yml` and not be in `excludedFunctions`, and each count must be an integer of 0 or more (digit strings are accepted).
+
+The deploying credentials need `lambda:GetProvisionedConcurrencyConfig`, `lambda:PutProvisionedConcurrencyConfig` and `lambda:DeleteProvisionedConcurrencyConfig`.
+
+To skip the step for one deploy, pass `--skip-provisioned-concurrency`, or set `skipProvisionedConcurrency: true` under `custom.alias`.
+
 ## Plugin Compatibility and Limitations
 
 Alongside other Serverless plugins:
@@ -324,5 +366,7 @@ MIT. See [LICENSE.md](./LICENSE.md); the original work is copyright Alexandre Ca
 ## Development and releases
 
 This is an internal BudSense library. Open a pull request against `master` and keep `CHANGELOG.md` current in the same pull request.
+
+`npm test` runs the unit tests with Node's built-in runner; there is nothing to install first. The tests cover configuration parsing and each deploy step against stubbed AWS clients, so they need no credentials.
 
 A release is a `vX.Y.Z` tag on `master`. Services pin that tag in `package.json` (`github:mobilefirstdev/budsense-serverless-plugins#vX.Y.Z`) and pick up a release by bumping it.
