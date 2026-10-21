@@ -1,57 +1,66 @@
 <div align="center">
 
-# `serverless-aws-alias-v4`
+# `budsense-serverless-plugins`
 
-[![npm.badge]][npm] [![download.badge]][download] [![contribution.badge]][contribution]
-
-Serverless framework plugin to manage AWS Lambda aliases and API Gateway integrations
+BudSense's Serverless Framework plugin library for alias-based Lambda deployments
 </div>
 
-This plugin facilitates the management of multiple Lambda function versions and seamlessly updates API Gateway endpoints to reference the appropriate alias.
+BudSense services deploy with the Serverless Framework and serve traffic from a Lambda alias per stage (`dev`, `staging`, `prod`, plus `rc` on the prod stack) rather than from `$LATEST`. This repository holds the deploy-time plugin that makes that work: one npm package, installed from GitHub at a tagged release, that every service lists under `plugins:`.
 
-Key features:
+The package began as a fork of [serverless-aws-alias-v4](https://github.com/Castlenine/serverless-aws-alias-v4) by Alexandre Castlenine (MIT). BudSense now maintains it as its own library; it no longer tracks upstream.
 
-- Automatically creates and maintains Lambda aliases corresponding to deployment stages.
-- Redirects API Gateway integrations to the appropriate Lambda function aliases.
-- **Multi-alias routing on a single API**: deploy a non-default alias (e.g. `rc`) into the same CloudFormation stack as `prod` and the plugin will create a parallel API Gateway stage that routes to the alias-versioned Lambda. Multiple aliases coexist on one REST/WebSocket API.
-- **Auto-discovery of API IDs** from CloudFormation stack outputs (`ServiceEndpoint`, `ServiceEndpointWebsocket`) when not pre-supplied via `provider.apiGateway.restApiId` / `provider.websocketApiId`.
-- Supports both HTTP (REST API) and WebSocket API Gateway events.
-- Handles mixed services with both HTTP and WebSocket events simultaneously.
-- Handles Lambda permission configuration for API Gateway invocations.
-- Ensures API Gateway method settings are properly validated.
+## What the plugin does
+
+After CloudFormation has deployed the stack, the plugin runs these steps in order. Each has its own section below.
+
+1. **Lambda aliases.** Publishes a new version of each function that changed and points the stage alias at it.
+2. **Async invoke settings.** Mirrors `maximumRetryAttempts` and `maximumEventAge` onto the alias, since Serverless only sets them on `$LATEST`.
+3. **API Gateway routing.** Rewrites each REST and WebSocket integration to invoke `function:${stageVariables.alias}`, grants the invoke permissions, and deploys the stage. A non-default alias (`--param alias=rc`) gets its own stage on the same API.
+
+Every step reads its configuration from `custom.alias` in `serverless.yml`. The alias and API Gateway steps live in `src/index.js`; each later step is its own file under `src/` and only hooks into the deploy flow there.
 
 ## Installation
 
+Install the package from GitHub at a tagged release and list it under `plugins:`:
+
 ```bash
-npm install --save-dev serverless-aws-alias-v4
+npm install --save-dev github:mobilefirstdev/budsense-serverless-plugins#v1.0.0
 ```
-
-## Usage
-
-Add the plugin to your `serverless.yml` file:
 
 ```yaml
 plugins:
-  - serverless-aws-alias-v4
+  - budsense-serverless-plugins
 ```
 
-Configure the plugin in your `serverless.yml` file:
+It needs Serverless Framework 4 and Node 18 or later, and has no runtime dependencies of its own.
+
+## Configuration
+
+Everything lives under `custom.alias`. The shortest form names the alias:
 
 ```yaml
 custom:
   alias: dev
 ```
 
-If the `alias` property is not defined, the plugin will use the stage name specified in the provider section as a fallback.
+When `custom.alias` is not set, the alias is the stage from the provider section:
 
 ```yaml
 provider:
   stage: dev
 ```
 
-### Complete Configuration Example
+BudSense services take the alias from the deploy command, so `sls deploy --stage prod` uses `prod` and `sls deploy --stage prod --param alias=rc` uses `rc`:
 
-Here's a comprehensive example showing all available configuration options:
+```yaml
+custom:
+  alias:
+    name: ${param:alias, sls:stage}
+```
+
+### Complete configuration example
+
+Every option, with its default where it has one:
 
 ```yaml
 custom:
@@ -65,9 +74,13 @@ custom:
     verbose: true                   # Enable detailed logging (default: false)
 ```
 
-### API Gateway Configuration
+## Lambda aliases and API Gateway routing
 
-This plugin supports both HTTP (REST API) and WebSocket event types:
+On every deploy the plugin publishes a new version of each function whose code or environment changed and points the stage alias at it; a function with no changes keeps its alias where it is. It then rewrites each API Gateway integration to invoke `function:${stageVariables.alias}`, so the stage variable, not the integration, decides which alias serves a request.
+
+### API Gateway configuration
+
+Both HTTP (REST API) and WebSocket event types are supported:
 
 #### HTTP API Gateway
 
@@ -179,7 +192,7 @@ aws lambda delete-alias --function-name <lambda-function-name> --name <alias> --
 
 If you do not pre-set `provider.apiGateway.restApiId` or `provider.websocketApiId`, the plugin discovers them at deploy time from the standard Serverless Framework outputs `ServiceEndpoint` and `ServiceEndpointWebsocket`. No additional configuration is required for services whose REST and WebSocket APIs are created by the same CloudFormation stack.
 
-### Excluding Functions
+### Excluding functions
 
 To exclude specific functions from alias management:
 
@@ -209,7 +222,7 @@ custom:
       - warmUpPluginDefault
 ```
 
-### Skipping API Gateway Deployments
+### Skipping API Gateway deployments
 
 By default, the plugin automatically deploys both HTTP API Gateway and WebSocket API Gateway after updating integrations. You can control this behavior using configuration options to skip deployments when needed.
 
@@ -262,7 +275,7 @@ Additionally, you can use CLI flags to override these skip settings during deplo
 
 These flags take precedence over the configuration in serverless.yml and set the corresponding skip option to true when present.
 
-### Async invoke settings on the alias
+## Async invoke settings on the alias
 
 Serverless compiles a function's `maximumRetryAttempts` and `maximumEventAge` into an `EventInvokeConfig` on `$LATEST` only. An alias carries its own `EventInvokeConfig`, so anything invoking the alias asynchronously otherwise runs on Lambda's defaults (2 retries, 6 hour event age) no matter what `serverless.yml` says.
 
@@ -281,7 +294,7 @@ or pass `--skip-event-invoke-config` on the command line.
 
 ## Plugin Compatibility and Limitations
 
-When using this plugin, be aware of the following compatibility considerations:
+Alongside other Serverless plugins:
 
 - **Incompatible Plugin**: This plugin is **not compatible** with the [serverless-iam-roles-per-function](https://www.serverless.com/plugins/serverless-iam-roles-per-function) plugin.
 - **Alternative Recommendation**: If you need custom IAM roles, we recommend using [serverless-iam-roles-per-function-v4](https://github.com/Castlenine/serverless-iam-roles-per-function-v4), which works seamlessly with this plugin.
@@ -306,15 +319,10 @@ custom:
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE.md](./LICENSE.md) file for details.
+MIT. See [LICENSE.md](./LICENSE.md); the original work is copyright Alexandre Castlenine and BudSense's changes are copyright BudSense.
 
-## Contributing
+## Development and releases
 
-Contributions are welcome! Feel free to submit a pull request or open an issue.
+This is an internal BudSense library. Open a pull request against `master` and keep `CHANGELOG.md` current in the same pull request.
 
-[npm]: https://www.npmjs.com/package/serverless-aws-alias-v4
-[npm.badge]: https://img.shields.io/npm/v/serverless-aws-alias-v4
-[download]: https://www.npmjs.com/package/serverless-aws-alias-v4
-[download.badge]: https://img.shields.io/npm/d18m/serverless-aws-alias-v4
-[contribution]: https://github.com/Castlenine/serverless-aws-alias-v4
-[contribution.badge]: https://img.shields.io/badge/contributions-welcome-green
+A release is a `vX.Y.Z` tag on `master`. Services pin that tag in `package.json` (`github:mobilefirstdev/budsense-serverless-plugins#vX.Y.Z`) and pick up a release by bumping it.
