@@ -5,7 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.1] - 2026-10-22
+
+### Changed
+
+- **Deploy output names each step's outcome.** The provisioned concurrency and Cognito steps print their per-function results (requested, ready, removed, granted) without `--verbose`, so a deploy log shows what changed on the alias. Errors and warnings already printed; the rest stays behind `--verbose` or `custom.alias.verbose`.
+
+## [1.0.0] - 2026-10-22
 
 ### Added
 

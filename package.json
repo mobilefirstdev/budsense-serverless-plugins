@@ -1,6 +1,6 @@
 {
 	"name": "budsense-serverless-plugins",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "BudSense Serverless Framework plugin: Lambda alias management, API Gateway alias routing and per-alias deployment settings",
 	"license": "MIT",
 	"private": true,

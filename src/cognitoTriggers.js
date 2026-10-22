@@ -157,7 +157,10 @@ async function applyCognitoTriggerPermissions(plugin, functions) {
 				}).promise(),
 			);
 
-			plugin.debugLog(`Granted ${POOL_ARN} permission to invoke '${QUALIFIED_FUNCTION_NAME}'`, { type: 'success' });
+			plugin.debugLog(`Granted ${POOL_ARN} permission to invoke '${QUALIFIED_FUNCTION_NAME}'`, {
+				forceShow: true,
+				type: 'success',
+			});
 		} catch (error) {
 			plugin.debugLog(`Error granting Cognito permission on '${QUALIFIED_FUNCTION_NAME}': ${error.message}`, {
 				forceShow: true,

@@ -167,6 +167,7 @@ async function applyProvisionedConcurrency(plugin, functions, waitOptions = {}) 
 					}).promise(),
 				);
 				plugin.debugLog(`Requested ${WANTED} provisioned instance(s) on '${QUALIFIED_FUNCTION_NAME}'`, {
+					forceShow: true,
 					type: 'success',
 				});
 				WAIT_FOR.push(FUNCTION.functionName);
@@ -174,7 +175,10 @@ async function applyProvisionedConcurrency(plugin, functions, waitOptions = {}) 
 				await plugin.retryOnThrottle(`deleteProvisionedConcurrencyConfig(${QUALIFIED_FUNCTION_NAME})`, () =>
 					LAMBDA.deleteProvisionedConcurrencyConfig({ FunctionName: FUNCTION.functionName, Qualifier: ALIAS }).promise(),
 				);
-				plugin.debugLog(`Removed provisioned concurrency from '${QUALIFIED_FUNCTION_NAME}'`, { type: 'success' });
+				plugin.debugLog(`Removed provisioned concurrency from '${QUALIFIED_FUNCTION_NAME}'`, {
+					forceShow: true,
+					type: 'success',
+				});
 			} else if (ACTION === 'keep') {
 				WAIT_FOR.push(FUNCTION.functionName);
 			}
@@ -221,7 +225,7 @@ async function waitForProvisionedConcurrency(
 			if (CONFIG.Status === 'READY') {
 				plugin.debugLog(
 					`'${QUALIFIED_FUNCTION_NAME}' has ${CONFIG.AvailableProvisionedConcurrentExecutions} provisioned instance(s) ready`,
-					{ type: 'success' },
+					{ forceShow: true, type: 'success' },
 				);
 				PENDING.delete(FUNCTION_NAME);
 			} else if (CONFIG.Status === 'FAILED') {
