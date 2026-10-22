@@ -3,6 +3,7 @@
 const PLUGIN_NAME = 'budsense-serverless-plugins';
 
 const { parseProvisionedConcurrencyConfig, applyProvisionedConcurrency } = require('./provisionedConcurrency');
+const { parseCognitoTriggersConfig, applyCognitoTriggerPermissions } = require('./cognitoTriggers');
 
 // Determine debug logging state (can be set via SLS_DEBUG=true or --verbose flag)
 const IS_DEBUG = process.env?.SLS_DEBUG || process.argv.includes('--verbose') || process.argv.includes('-v');
@@ -62,6 +63,7 @@ class ServerlessLambdaAliasPlugin {
 			skipEventInvokeConfig: false,
 			skipProvisionedConcurrency: false,
 			provisionedConcurrency: null, // Map<alias, Map<function, count>> once validated; null until then and when not configured
+			cognitoTriggers: null, // { userPool | userPoolArn, functions } once validated; null until then and when not configured
 			region: this.provider.getRegion(),
 			restApiId: this.serverless.service.provider.apiGateway?.restApiId,
 			websocketApiId: this.serverless.service.provider.websocketApiId,
@@ -211,6 +213,7 @@ class ServerlessLambdaAliasPlugin {
 			process.argv.includes('--skip-provisioned-concurrency') ||
 			(CUSTOM_ALIAS_CONFIG.skipProvisionedConcurrency ?? false);
 		this.config.rawProvisionedConcurrency = CUSTOM_ALIAS_CONFIG.provisionedConcurrency;
+		this.config.rawCognitoTriggers = CUSTOM_ALIAS_CONFIG.cognitoTriggers;
 
 		// Check what event types are used in this service
 		const { hasHttpEvents, hasWebsocketEvents } = this.detectEventTypes();
@@ -303,6 +306,17 @@ class ServerlessLambdaAliasPlugin {
 		}
 
 		this.config.provisionedConcurrency = PROVISIONED.byAlias;
+
+		const COGNITO = parseCognitoTriggersConfig(this.config.rawCognitoTriggers, {
+			functionKeys: new Set(Object.keys(SERVICE.functions || {})),
+			excludedFunctions: this.config.excludedFunctions,
+		});
+
+		if (COGNITO.problems.length > 0) {
+			throw new this.serverless.classes.Error(`Invalid custom.alias.cognitoTriggers:\n${COGNITO.problems.join('\n')}`);
+		}
+
+		this.config.cognitoTriggers = COGNITO.config;
 
 		const INVALID_CONFIG = [];
 
@@ -476,6 +490,9 @@ class ServerlessLambdaAliasPlugin {
 
 			// Same scope as above: the config may have changed on a deploy that republished nothing
 			await applyProvisionedConcurrency(this, FUNCTIONS);
+
+			// Needed on a stage's first deploy, when the alias did not exist while CloudFormation ran
+			await applyCognitoTriggerPermissions(this, FUNCTIONS);
 
 			if (CREATED_ALIASES.length === 0) {
 				this.debugLog(
