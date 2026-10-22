@@ -2,6 +2,8 @@
 
 const PLUGIN_NAME = 'budsense-serverless-plugins';
 
+const { parseProvisionedConcurrencyConfig, applyProvisionedConcurrency } = require('./provisionedConcurrency');
+
 // Determine debug logging state (can be set via SLS_DEBUG=true or --verbose flag)
 const IS_DEBUG = process.env?.SLS_DEBUG || process.argv.includes('--verbose') || process.argv.includes('-v');
 // Check if force deployment is requested
@@ -58,6 +60,8 @@ class ServerlessLambdaAliasPlugin {
 			skipApiGateway: false,
 			skipWebSocketGateway: false,
 			skipEventInvokeConfig: false,
+			skipProvisionedConcurrency: false,
+			provisionedConcurrency: null, // Map<alias, Map<function, count>> once validated; null until then and when not configured
 			region: this.provider.getRegion(),
 			restApiId: this.serverless.service.provider.apiGateway?.restApiId,
 			websocketApiId: this.serverless.service.provider.websocketApiId,
@@ -202,6 +206,12 @@ class ServerlessLambdaAliasPlugin {
 		this.config.skipEventInvokeConfig =
 			process.argv.includes('--skip-event-invoke-config') || (CUSTOM_ALIAS_CONFIG.skipEventInvokeConfig ?? false);
 
+		// Load Skip Provisioned Concurrency (with CLI flag override); the map itself is parsed in validateConfiguration
+		this.config.skipProvisionedConcurrency =
+			process.argv.includes('--skip-provisioned-concurrency') ||
+			(CUSTOM_ALIAS_CONFIG.skipProvisionedConcurrency ?? false);
+		this.config.rawProvisionedConcurrency = CUSTOM_ALIAS_CONFIG.provisionedConcurrency;
+
 		// Check what event types are used in this service
 		const { hasHttpEvents, hasWebsocketEvents } = this.detectEventTypes();
 
@@ -279,6 +289,20 @@ class ServerlessLambdaAliasPlugin {
 					'This restriction comes from AWS Lambda alias rules and API Gateway stage name rules.',
 			);
 		}
+
+		const PROVISIONED = parseProvisionedConcurrencyConfig(this.config.rawProvisionedConcurrency, {
+			functionKeys: new Set(Object.keys(SERVICE.functions || {})),
+			excludedFunctions: this.config.excludedFunctions,
+			isValidAliasName: (name) => VALID_ALIAS_NAME.test(name),
+		});
+
+		if (PROVISIONED.problems.length > 0) {
+			throw new this.serverless.classes.Error(
+				`Invalid custom.alias.provisionedConcurrency:\n${PROVISIONED.problems.join('\n')}`,
+			);
+		}
+
+		this.config.provisionedConcurrency = PROVISIONED.byAlias;
 
 		const INVALID_CONFIG = [];
 
@@ -449,6 +473,9 @@ class ServerlessLambdaAliasPlugin {
 
 			// Every aliased function, not only those republished this deploy, so the first deploy after enabling covers the whole service
 			await this.applyAliasEventInvokeConfigs(FUNCTIONS);
+
+			// Same scope as above: the config may have changed on a deploy that republished nothing
+			await applyProvisionedConcurrency(this, FUNCTIONS);
 
 			if (CREATED_ALIASES.length === 0) {
 				this.debugLog(
