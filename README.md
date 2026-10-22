@@ -379,7 +379,7 @@ Alongside other Serverless plugins:
 
 ## Debugging
 
-By default, only error messages are displayed. To view detailed logs, use one of these methods:
+By default the plugin prints errors, warnings and the outcome of each provisioned concurrency and Cognito step (requested, ready, removed, granted). To see every step it takes, use one of these methods:
 
 - Set the environment variable `SLS_DEBUG=*`
 - Use the `--verbose` or `-v` flag when deploying: `sls deploy --verbose`
