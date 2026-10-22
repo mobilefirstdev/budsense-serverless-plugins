@@ -1,23 +1,29 @@
 {
-	"name": "serverless-aws-alias-v4",
-	"version": "0.7.0",
-	"description": "Serverless framework plugin to manage AWS Lambda aliases and API Gateway integrations",
+	"name": "budsense-serverless-plugins",
+	"version": "1.0.0",
+	"description": "BudSense Serverless Framework plugin: Lambda alias management, API Gateway alias routing and per-alias deployment settings",
 	"license": "MIT",
-	"author": {
-		"name": "Alexandre Castlenine",
-		"url": "https://github.com/Castlenine"
-	},
+	"private": true,
+	"author": "BudSense",
+	"contributors": [
+		{
+			"name": "Andrew Cretin",
+			"url": "https://github.com/andrewcretin"
+		}
+	],
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/castlenine/serverless-aws-alias-v4.git"
+		"url": "git+https://github.com/mobilefirstdev/budsense-serverless-plugins.git"
 	},
 	"bugs": {
-		"url": "https://github.com/castlenine/serverless-aws-alias-v4/issues"
+		"url": "https://github.com/mobilefirstdev/budsense-serverless-plugins/issues"
 	},
+	"homepage": "https://github.com/mobilefirstdev/budsense-serverless-plugins#readme",
 	"keywords": [
 		"alias",
 		"api-gateway",
 		"aws",
+		"budsense",
 		"http",
 		"lambda",
 		"plugin",
@@ -27,9 +33,6 @@
 		"websocket"
 	],
 	"main": "src/index.js",
-	"scripts": {
-		"publish-package": "npm publish --access public"
-	},
 	"peerDependencies": {
 		"serverless": ">=4.0.0"
 	}

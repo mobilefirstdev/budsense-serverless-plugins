@@ -1,6 +1,6 @@
 'use strict';
 
-const PLUGIN_NAME = 'serverless-aws-alias-v4';
+const PLUGIN_NAME = 'budsense-serverless-plugins';
 
 // Determine debug logging state (can be set via SLS_DEBUG=true or --verbose flag)
 const IS_DEBUG = process.env?.SLS_DEBUG || process.argv.includes('--verbose') || process.argv.includes('-v');
